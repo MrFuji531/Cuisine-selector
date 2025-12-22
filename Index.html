@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Country Spinner</title>
+  <style>
+    :root { --bg:#0b0c10; --panel:#12141a; --text:#e9eef7; --muted:#9aa7bd; --accent:#5aa7ff; --danger:#ff5a7a; }
+    * { box-sizing:border-box; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+    body { margin:0; background:var(--bg); color:var(--text); }
+    header { padding:14px 16px; border-bottom:1px solid #232632; display:flex; gap:10px; align-items:center; justify-content:space-between; }
+    header h1 { margin:0; font-size:16px; font-weight:800; letter-spacing:.2px; }
+    .tabs { display:flex; gap:8px; }
+    .tabbtn { background:transparent; border:1px solid #2a2f3d; color:var(--text); padding:8px 10px; border-radius:10px; font-weight:750; }
+    .tabbtn.active { border-color:var(--accent); color:var(--accent); }
+    main { padding:14px 14px 22px; max-width:980px; margin:0 auto; }
+    .grid { display:grid; gap:14px; grid-template-columns: 1fr; }
+    @media (min-width: 860px){ .grid { grid-template-columns: 1.2fr .8fr; } }
+    .card { background:var(--panel); border:1px solid #24283a; border-radius:16px; padding:14px; }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    button { cursor:pointer; border:0; border-radius:12px; padding:10px 12px; font-weight:850; }
+    .primary { background:var(--accent); color:#07111f; }
+    .ghost { background:transparent; border:1px solid #2a2f3d; color:var(--text); }
+    .danger { background:var(--danger); color:#12060a; }
+    .small { padding:8px 10px; border-radius:10px; font-weight:800; }
+    .muted { color:var(--muted); }
+    .bigbox {
+      margin-top:12px;
+      padding:18px;
+      border-radius:18px;
+      border:1px solid #2a2f3d;
+      background: #0f1220;
+      min-height:86px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      text-align:center;
+      font-size:22px;
+      font-weight:950;
+      letter-spacing:.3px;
+    }
+    canvas { width:100%; height:auto; max-width:560px; display:block; margin:0 auto; }
+    .pointer {
+      width:0; height:0;
+      border-left:12px solid transparent;
+      border-right:12px solid transparent;
+      border-top:18px solid var(--accent);
+      margin: 0 auto 10px;
+      filter: drop-shadow(0 2px 6px rgba(90,167,255,.35));
+    }
+    .kpi { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px; }
+    .kpi > div { background:#0f1220; border:1px solid #2a2f3d; border-radius:14px; padding:10px; }
+    .kpi .v { font-weight:950; font-size:16px; }
+    .kpi .l { font-size:12px; color:var(--muted); margin-top:2px; }
+    .legend-title { font-weight:900; margin-bottom:8px; }
+    .legend {
+      background:#0f1220;
+      border:1px solid #2a2f3d;
+      border-radius:14px;
+      padding:10px;
+      max-height:420px;
+      overflow:auto;
+    }
+    .legend-item { display:flex; gap:10px; padding:6px 0; border-bottom:1px solid rgba(42,47,61,.55); }
+    .legend-item:last-child { border-bottom:0; }
+    .badge {
+      min-width:34px;
+      text-align:center;
+      font-weight:950;
+      border-radius:10px;
+      padding:4px 8px;
+      background: rgba(90,167,255,.15);
+      border:1px solid rgba(90,167,255,.35);
+      color: var(--text);
+    }
+    .rank-item { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px; border:1px solid #2a2f3d; border-radius:14px; background:#0f1220; margin:8px 0; }
+    .rank-name { font-weight:900; }
+    .rank-actions { display:flex; gap:6px; }
+    select {
+      background:#0f1220; color:var(--text);
+      border:1px solid #2a2f3d; border-radius:12px;
+      padding:10px 12px; font-weight:800;
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>🌍 Country Spinner</h1>
+  <div class="tabs">
+    <button class="tabbtn active" id="tabSpin">Spinner</button>
+    <button class="tabbtn" id="tabRank">Rankings</button>
+  </div>
+</header>
+
+<main>
+  <section id="spinView">
+    <div class="grid">
+      <div class="card">
+        <div class="pointer"></div>
+        <canvas id="wheel" width="900" height="900"></canvas>
+
+        <div class="row" style="justify-content:center; margin-top:12px;">
+          <button class="primary" id="spinBtn">SPIN</button>
+          <button class="ghost" id="undoBtn">Undo</button>
+          <button class="danger" id="resetBtn">Reset</button>
+        </div>
+
+        <div class="bigbox" id="nextBox">Next destination: —</div>
+
+        <div class="kpi">
+          <div><div class="v" id="remainingCount">—</div><div class="l">Remaining</div></div>
+          <div><div class="v" id="rankedCount">—</div><div class="l">Ranked</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="legend-title">Wheel legend</div>
+        <div class="muted" id="legendMode" style="font-size:12px; margin-bottom:10px;"></div>
+        <div class="legend" id="legend"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="rankView" style="display:none;">
+    <div class="grid">
+      <div class="card">
+        <div class="row" style="justify-content:space-between;">
+          <div style="font-weight:950;">Rankings</div>
+          <button class="danger small" id="resetBtn2">Reset</button>
+        </div>
+
+        <div id="pendingBanner" class="bigbox" style="display:none; margin-top:12px;"></div>
+
+        <div class="row" style="margin-top:12px;">
+          <select id="insertPos"></select>
+          <button class="primary" id="placeBtn">Place</button>
+          <button class="ghost" id="skipPendingBtn">Skip</button>
+        </div>
+
+        <div id="rankingList" style="margin-top:12px;"></div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:950;">Latest selected</div>
+        <div class="bigbox" id="latestBox" style="margin-top:12px; min-height:72px; font-size:18px;">—</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const ALL_COUNTRIES = [
+  "Afghanistan","Albania","Algeria","Andorra","Angola","Antigua and Barbuda","Argentina","Armenia","Australia","Austria","Azerbaijan",
+  "Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil","Brunei Darussalam","Bulgaria","Burkina Faso","Burundi",
+  "Cabo Verde","Cambodia","Cameroon","Canada","Central African Republic","Chad","Chile","China","Colombia","Comoros","Congo","Democratic Republic of the Congo","Costa Rica","Côte d'Ivoire","Croatia","Cuba","Cyprus","Czechia",
+  "Denmark","Djibouti","Dominica","Dominican Republic",
+  "Ecuador","Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Eswatini","Ethiopia",
+  "Fiji","Finland","France",
+  "Gabon","Gambia","Georgia","Germany","Ghana","Greece","Grenada","Guatemala","Guinea","Guinea-Bissau","Guyana",
+  "Haiti","Honduras","Hungary",
+  "Iceland","India","Indonesia","Iran","Iraq","Ireland","Israel","Italy",
+  "Jamaica","Japan","Jordan",
+  "Kazakhstan","Kenya","Kiribati","Korea, Democratic People's Republic of","Korea, Republic of","Kuwait","Kyrgyzstan",
+  "Lao People's Democratic Republic","Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein","Lithuania","Luxembourg",
+  "Madagascar","Malawi","Malaysia","Maldives","Mali","Malta","Marshall Islands","Mauritania","Mauritius","Mexico","Micronesia (Federated States of)","Moldova","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Myanmar",
+  "Namibia","Nauru","Nepal","Netherlands","New Zealand","Nicaragua","Niger","Nigeria","North Macedonia","Norway",
+  "Oman",
+  "Pakistan","Palau","Panama","Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal",
+  "Qatar",
+  "Romania","Russian Federation","Rwanda",
+  "Saint Kitts and Nevis","Saint Lucia","Saint Vincent and the Grenadines","Samoa","San Marino","Sao Tome and Principe","Saudi Arabia","Senegal","Serbia","Seychelles","Sierra Leone","Singapore","Slovakia","Slovenia","Solomon Islands","Somalia","South Africa","South Sudan","Spain","Sri Lanka","Sudan","Suriname","Sweden","Switzerland","Syrian Arab Republic",
+  "Tajikistan","Tanzania, United Republic of","Thailand","Timor-Leste","Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Tuvalu",
+  "Uganda","Ukraine","United Arab Emirates","United Kingdom","United States of America","Uruguay","Uzbekistan",
+  "Vanuatu","Venezuela","Viet Nam",
+  "Yemen",
+  "Zambia","Zimbabwe"
+];
+
+const STORAGE_KEY = "countrySpinner.un193.v2";
+
+function loadState(){ try{ const raw=localStorage.getItem(STORAGE_KEY); return raw?JSON.parse(raw):null; }catch{ return null; } }
+function saveState(s){ localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); }
+function freshState(){ return { remaining:[...ALL_COUNTRIES], history:[], ranked:[], pending:null, wheelAngle:0 }; }
+
+let state = loadState() || freshState();
+
+const tabSpin = document.getElementById("tabSpin");
+const tabRank = document.getElementById("tabRank");
+const spinView = document.getElementById("spinView");
+const rankView = document.getElementById("rankView");
+
+tabSpin.onclick = () => showTab("spin");
+tabRank.onclick = () => showTab("rank");
+
+function showTab(which){
+  const isSpin = which === "spin";
+  spinView.style.display = isSpin ? "block" : "none";
+  rankView.style.display = isSpin ? "none" : "block";
+  tabSpin.classList.toggle("active", isSpin);
+  tabRank.classList.toggle("active", !isSpin);
+  renderAll();
+}
+
+const wheel = document.getElementById("wheel");
+const ctx = wheel.getContext("2d");
+const spinBtn = document.getElementById("spinBtn");
+const undoBtn = document.getElementById("undoBtn");
+const resetBtn = document.getElementById("resetBtn");
+const resetBtn2 = document.getElementById("resetBtn2");
+const nextBox = document.getElementById("nextBox");
+const remainingCount = document.getElementById("remainingCount");
+const rankedCount = document.getElementById("rankedCount");
+const legend = document.getElementById("legend");
+const legendMode = document.getElementById("legendMode");
+
+const pendingBanner = document.getElementById("pendingBanner");
+const insertPos = document.getElementById("insertPos");
+const placeBtn = document.getElementById("placeBtn");
+const skipPendingBtn = document.getElementById("skipPendingBtn");
+const rankingList = document.getElementById("rankingList");
+const latestBox = document.getElementById("latestBox");
+
+function segmentColor(i, n){
+  const hue = (i * (360 / Math.max(n,1))) % 360;
+  return `hsl(${hue} 70% 52%)`;
+}
+
+function drawWheel(){
+  const items = state.remaining;
+  const n = items.length;
+  const W = wheel.width, H = wheel.height;
+  const cx = W/2, cy = H/2;
+  const r = Math.min(W,H)*0.44;
+
+  ctx.clearRect(0,0,W,H);
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, r+18, 0, Math.PI*2);
+  ctx.fillStyle = "#0f1220";
+  ctx.fill();
+  ctx.strokeStyle = "#2a2f3d";
+  ctx.lineWidth = 5;
+  ctx.stroke();
+
+  if (n === 0){
+    ctx.fillStyle = "#e9eef7";
+    ctx.font = "900 34px system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText("All done 🎉", cx, cy);
+    return;
+  }
+
+  const anglePer = (Math.PI * 2) / n;
+  const startAngle = state.wheelAngle;
+
+  const SHOW_NAMES_THRESHOLD = 18;
+  const showNames = n <= SHOW_NAMES_THRESHOLD;
+
+  for (let i=0; i<n; i++){
+    const a0 = startAngle + i*anglePer;
+    const a1 = a0 + anglePer;
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, a0, a1);
+    ctx.closePath();
+    ctx.fillStyle = segmentColor(i, n);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,.22)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const mid = (a0 + a1)/2;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(mid);
+
+    if (showNames){
+      const label = items[i].length > 20 ? items[i].slice(0,20) + "…" : items[i];
+      ctx.textAlign = "right";
+      ctx.fillStyle = "#07111f";
+      ctx.font = "900 20px system-ui";
+      ctx.fillText(label, r-14, 7);
+    } else {
+      const labelNum = (i+1).toString();
+      ctx.textAlign = "center";
+      ctx.fillStyle = "rgba(7,17,31,.92)";
+      ctx.font = "950 28px system-ui";
+      ctx.fillText(labelNum, r*0.70, 10);
+    }
+
+    ctx.restore();
+  }
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, 70, 0, Math.PI*2);
+  ctx.fillStyle = "#12141a";
+  ctx.fill();
+  ctx.strokeStyle = "#2a2f3d";
+  ctx.lineWidth = 5;
+  ctx.stroke();
+
+  ctx.fillStyle = "#e9eef7";
+  ctx.font = "950 18px system-ui";
+  ctx.textAlign = "center";
+  ctx.fillText("SPIN", cx, cy+6);
+}
+
+function pickSelectedByPointer(){
+  const n = state.remaining.length;
+  if (n === 0) return null;
+  const anglePer = (Math.PI*2)/n;
+  const topAngle = -Math.PI/2;
+  let diff = topAngle - state.wheelAngle;
+  diff = ((diff % (Math.PI*2)) + (Math.PI*2)) % (Math.PI*2);
+  const idx = Math.floor(diff / anglePer) % n;
+  return { idx, name: state.remaining[idx] };
+}
+
+function updateCounts(){
+  remainingCount.textContent = String(state.remaining.length);
+  rankedCount.textContent = String(state.ranked.length);
+}
+
+function renderNextBox(){
+  nextBox.textContent = state.pending ? `Next destination: ${state.pending}!` : "Next destination: —";
+  latestBox.textContent = state.history.length ? state.history[state.history.length-1] : "—";
+}
+
+function renderLegend(){
+  const n = state.remaining.length;
+  const showNames = n <= 18;
+  legendMode.textContent = showNames ? "Names are shown on the wheel." : "Wheel shows numbers. Use this list to read the country names.";
+  legend.innerHTML = "";
+  if (n === 0) return;
+
+  const cap = 120;
+  const list = state.remaining.slice(0, cap);
+  for (let i=0; i<list.length; i++){
+    const row = document.createElement("div");
+    row.className = "legend-item";
+    row.innerHTML = `<div class="badge">${i+1}</div><div>${escapeHtml(list[i])}</div>`;
+    legend.appendChild(row);
+  }
+  if (n > cap){
+    const more = document.createElement("div");
+    more.className = "muted";
+    more.style.paddingTop = "8px";
+    more.textContent = `…and ${n-cap} more`;
+    legend.appendChild(more);
+  }
+}
+
+function renderInsertPos(){
+  const n = state.ranked.length;
+  insertPos.innerHTML = "";
+  for (let i=1; i<=n+1; i++){
+    const opt = document.createElement("option");
+    opt.value = i;
+    opt.textContent = `#${i}`;
+    insertPos.appendChild(opt);
+  }
+}
+
+function maybePending(){
+  if (state.pending){
+    pendingBanner.style.display = "flex";
+    pendingBanner.textContent = `Rank this: ${state.pending}`;
+  } else {
+    pendingBanner.style.display = "none";
+  }
+}
+
+function renderRanking(){
+  rankingList.innerHTML = "";
+  if (state.ranked.length === 0){
+    rankingList.innerHTML = `<div class="muted" style="margin-top:10px;">—</div>`;
+    return;
+  }
+  state.ranked.forEach((name, idx) => {
+    const row = document.createElement("div");
+    row.className = "rank-item";
+    const left = document.createElement("div");
+    left.innerHTML = `<div class="rank-name">#${idx+1} — ${escapeHtml(name)}</div>`;
+    const actions = document.createElement("div");
+    actions.className = "rank-actions";
+
+    const up = document.createElement("button");
+    up.className = "ghost small";
+    up.textContent = "↑";
+    up.disabled = idx === 0;
+    up.onclick = () => { moveRank(idx, idx-1); };
+
+    const down = document.createElement("button");
+    down.className = "ghost small";
+    down.textContent = "↓";
+    down.disabled = idx === state.ranked.length-1;
+    down.onclick = () => { moveRank(idx, idx+1); };
+
+    actions.appendChild(up);
+    actions.appendChild(down);
+    row.appendChild(left);
+    row.appendChild(actions);
+    rankingList.appendChild(row);
+  });
+}
+
+function moveRank(from, to){
+  const item = state.ranked.splice(from,1)[0];
+  state.ranked.splice(to,0,item);
+  saveState(state);
+  renderAll();
+}
+
+function escapeHtml(s){
+  return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+let isSpinning = false;
+
+spinBtn.onclick = () => {
+  if (isSpinning || state.remaining.length === 0) return;
+  isSpinning = true;
+  renderAll();
+
+  const spins = 4 + Math.random() * 4;
+  const randomOffset = Math.random() * (Math.PI*2);
+  const start = state.wheelAngle;
+  const target = start + spins*(Math.PI*2) + randomOffset;
+
+  const duration = 1900 + Math.random()*800;
+  const t0 = performance.now();
+
+  function easeOutCubic(t){ return 1 - Math.pow(1-t, 3); }
+
+  function frame(now){
+    const t = Math.min(1, (now - t0) / duration);
+    const eased = easeOutCubic(t);
+    state.wheelAngle = start + (target - start) * eased;
+    drawWheel();
+    if (t < 1){
+      requestAnimationFrame(frame);
+    } else {
+      const picked = pickSelectedByPointer();
+      if (picked){
+        const selected = picked.name;
+        state.remaining.splice(picked.idx, 1);
+        state.history.push(selected);
+        state.pending = selected;
+        saveState(state);
+      }
+      isSpinning = false;
+      renderAll();
+    }
+  }
+  requestAnimationFrame(frame);
+};
+
+undoBtn.onclick = () => {
+  if (state.history.length === 0) return;
+  const last = state.history.pop();
+  if (state.pending === last) state.pending = null;
+  if (!state.remaining.includes(last)) state.remaining.push(last);
+  saveState(state);
+  renderAll();
+};
+
+function doReset(){
+  if (!confirm("Reset everything?")) return;
+  state = freshState();
+  saveState(state);
+  renderAll();
+}
+resetBtn.onclick = doReset;
+resetBtn2.onclick = doReset;
+
+placeBtn.onclick = () => {
+  if (!state.pending) return;
+  const pos = Math.max(1, Math.min(state.ranked.length+1, Number(insertPos.value || state.ranked.length+1)));
+  const name = state.pending;
+  state.ranked.splice(pos-1, 0, name);
+  state.pending = null;
+  saveState(state);
+  renderAll();
+};
+
+skipPendingBtn.onclick = () => {
+  saveState(state);
+  renderAll();
+};
+
+function renderAll(){
+  drawWheel();
+  updateCounts();
+  renderNextBox();
+  renderLegend();
+  renderInsertPos();
+  maybePending();
+  renderRanking();
+  undoBtn.disabled = state.history.length === 0;
+  spinBtn.disabled = isSpinning || state.remaining.length === 0;
+}
+
+saveState(state);
+renderAll();
+</script>
+</body>
+</html>

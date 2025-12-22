@@ -320,30 +320,6 @@ function renderNextBox(){
   latestBox.textContent = state.history.length ? state.history[state.history.length-1] : "—";
 }
 
-function renderLegend(){
-  const n = state.remaining.length;
-  const showNames = n <= 18;
-  legendMode.textContent = showNames ? "Names are shown on the wheel." : "Wheel shows numbers. Use this list to read the country names.";
-  legend.innerHTML = "";
-  if (n === 0) return;
-
-  const cap = 120;
-  const list = state.remaining.slice(0, cap);
-  for (let i=0; i<list.length; i++){
-    const row = document.createElement("div");
-    row.className = "legend-item";
-    row.innerHTML = `<div class="badge">${i+1}</div><div>${escapeHtml(list[i])}</div>`;
-    legend.appendChild(row);
-  }
-  if (n > cap){
-    const more = document.createElement("div");
-    more.className = "muted";
-    more.style.paddingTop = "8px";
-    more.textContent = `…and ${n-cap} more`;
-    legend.appendChild(more);
-  }
-}
-
 function renderInsertPos(){
   const n = state.ranked.length;
   insertPos.innerHTML = "";
@@ -486,7 +462,6 @@ function renderAll(){
   drawWheel();
   updateCounts();
   renderNextBox();
-  renderLegend();
   renderInsertPos();
   maybePending();
   renderRanking();

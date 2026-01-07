@@ -102,6 +102,7 @@
         <div class="row" style="justify-content:center; margin-top:12px;">
           <button class="primary" id="spinBtn">SPIN</button>
           <button class="ghost" id="undoBtn">Undo</button>
+          <button class="ghost small" id="syncBtn">🔄 Sync</button>
           <button class="danger" id="resetBtn">Reset</button>
         </div>
 
@@ -143,6 +144,137 @@
 </main>
 
 <script>
+// ==========================================
+// SUPABASE CONFIGURATION
+// ==========================================
+// TODO: Replace these with your Supabase credentials
+const SUPABASE_URL = 'https://dgbbloirhopjkpnckrdp.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRnYmJsb2lyaG9wamtwbmNrcmRwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3OTcwMzYsImV4cCI6MjA4MzM3MzAzNn0.iVWe7_wVqvQjCIG70Jr9qka_Gn1WeFlRxsIjIvd0Ayg';
+
+let supabaseClient = null;
+let userCode = null;
+let syncEnabled = false;
+
+function initSupabase() {
+  if (SUPABASE_URL === 'YOUR_SUPABASE_URL_HERE' || SUPABASE_ANON_KEY === 'YOUR_SUPABASE_ANON_KEY_HERE') {
+    console.log('Supabase not configured - using localStorage only');
+    return;
+  }
+  
+  supabaseClient = {
+    url: SUPABASE_URL,
+    key: SUPABASE_ANON_KEY,
+    
+    async getData(code) {
+      const response = await fetch(`${this.url}/rest/v1/cuisine_data?code=eq.${code}`, {
+        method: 'GET',
+        headers: {
+          'apikey': this.key,
+          'Authorization': `Bearer ${this.key}`,
+        }
+      });
+      const data = await response.json();
+      return data.length > 0 ? data[0] : null;
+    },
+    
+    async upsertData(code, stateData) {
+      const response = await fetch(`${this.url}/rest/v1/cuisine_data`, {
+        method: 'POST',
+        headers: {
+          'apikey': this.key,
+          'Authorization': `Bearer ${this.key}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'resolution=merge-duplicates'
+        },
+        body: JSON.stringify({
+          code: code,
+          data: stateData,
+          updated_at: new Date().toISOString()
+        })
+      });
+      return response.ok;
+    }
+  };
+  
+  syncEnabled = true;
+}
+
+async function promptForCode() {
+  const savedCode = localStorage.getItem('cuisineUserCode');
+  if (savedCode) {
+    userCode = savedCode;
+    return true;
+  }
+  
+  const code = prompt('Enter your shared code to sync data across devices:');
+  if (code && code.trim()) {
+    userCode = code.trim();
+    localStorage.setItem('cuisineUserCode', userCode);
+    return true;
+  }
+  return false;
+}
+
+async function syncToCloud() {
+  if (!syncEnabled || !userCode || !supabaseClient) return;
+  
+  try {
+    await supabaseClient.upsertData(userCode, state);
+    console.log('Synced to cloud successfully');
+  } catch (error) {
+    console.error('Sync error:', error);
+  }
+}
+
+async function syncFromCloud() {
+  if (!syncEnabled || !userCode || !supabaseClient) return;
+  
+  try {
+    const cloudData = await supabaseClient.getData(userCode);
+    if (cloudData && cloudData.data) {
+      state = { ...state, ...cloudData.data };
+      saveState();
+      renderAll();
+      console.log('Synced from cloud successfully');
+      return true;
+    }
+  } catch (error) {
+    console.error('Sync from cloud error:', error);
+  }
+  return false;
+}
+
+async function uploadLocalData() {
+  if (!syncEnabled || !userCode) return;
+  await syncToCloud();
+  alert('Your progress has been uploaded to the cloud!');
+}
+
+async function manualSync() {
+  if (!syncEnabled) {
+    alert('Cloud sync is not configured. Using local storage only.');
+    return;
+  }
+  
+  if (!userCode) {
+    const hasCode = await promptForCode();
+    if (!hasCode) return;
+  }
+  
+  try {
+    await syncToCloud();
+    await syncFromCloud();
+    alert('Sync completed successfully!');
+  } catch (error) {
+    alert('Sync failed. Please try again.');
+    console.error(error);
+  }
+}
+
+// ==========================================
+// EXISTING CODE
+// ==========================================
+
 const ALL_COUNTRIES = [
   "Afghanistan","Albania","Algeria","Andorra","Angola","Antigua and Barbuda","Argentina","Armenia","Australia","Austria","Azerbaijan",
   "Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil","Brunei Darussalam","Bulgaria","Burkina Faso","Burundi",
@@ -173,7 +305,12 @@ const ALL_COUNTRIES = [
 const STORAGE_KEY = "countrySpinner.un193.v2";
 
 function loadState(){ try{ const raw=localStorage.getItem(STORAGE_KEY); return raw?JSON.parse(raw):null; }catch{ return null; } }
-function saveState(s){ localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); }
+function saveState(s){ 
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(s || state)); 
+  if (syncEnabled) {
+    syncToCloud();
+  }
+}
 function freshState(){ return { remaining:[...ALL_COUNTRIES], history:[], ranked:[], pending:null, wheelAngle:0 }; }
 
 let state = loadState() || freshState();
@@ -201,6 +338,7 @@ const spinBtn = document.getElementById("spinBtn");
 const undoBtn = document.getElementById("undoBtn");
 const resetBtn = document.getElementById("resetBtn");
 const resetBtn2 = document.getElementById("resetBtn2");
+const syncBtn = document.getElementById("syncBtn");
 const nextBox = document.getElementById("nextBox");
 const remainingCount = document.getElementById("remainingCount");
 const rankedCount = document.getElementById("rankedCount");
@@ -211,6 +349,8 @@ const placeBtn = document.getElementById("placeBtn");
 const skipPendingBtn = document.getElementById("skipPendingBtn");
 const rankingList = document.getElementById("rankingList");
 const latestBox = document.getElementById("latestBox");
+
+syncBtn.onclick = manualSync;
 
 function segmentColor(i, n){
   const hue = (i * (360 / Math.max(n,1))) % 360;
@@ -469,8 +609,25 @@ function renderAll(){
   spinBtn.disabled = isSpinning || state.remaining.length === 0;
 }
 
-saveState(state);
-renderAll();
+// Initialize on load
+async function init() {
+  initSupabase();
+  
+  if (syncEnabled) {
+    const hasCode = await promptForCode();
+    if (hasCode) {
+      const synced = await syncFromCloud();
+      if (!synced) {
+        await uploadLocalData();
+      }
+    }
+  }
+  
+  saveState(state);
+  renderAll();
+}
+
+init();
 </script>
 </body>
 </html>

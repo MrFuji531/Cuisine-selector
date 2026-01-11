@@ -81,11 +81,20 @@
       border:1px solid #2a2f3d; border-radius:12px;
       padding:10px 12px; font-weight:800;
     }
+    .sync-status {
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      margin-left: 8px;
+    }
+    .sync-status.syncing { background: rgba(255, 193, 7, 0.2); color: #ffc107; }
+    .sync-status.synced { background: rgba(76, 175, 80, 0.2); color: #4caf50; }
+    .sync-status.error { background: rgba(244, 67, 54, 0.2); color: #f44336; }
   </style>
 </head>
 <body>
 <header>
-  <h1>Cuisine Spinner 🌎</h1>
+  <h1>Cuisine Spinner 🌎 <span id="syncStatus" class="sync-status"></span></h1>
   <div class="tabs">
     <button class="tabbtn active" id="tabSpin">Spinner</button>
     <button class="tabbtn" id="tabRank">Rankings</button>
@@ -129,7 +138,7 @@
         <div class="row" style="margin-top:12px;">
           <select id="insertPos"></select>
           <button class="primary" id="placeBtn">Place</button>
-          <button class="ghost" id="skipPendingBtn">Skip</button>
+          <button class="ghost" id="skipPendingBtn">Skip (add back)</button>
         </div>
 
         <div id="rankingList" style="margin-top:12px;"></div>
@@ -147,13 +156,28 @@
 // ==========================================
 // SUPABASE CONFIGURATION
 // ==========================================
-// TODO: Replace these with your Supabase credentials
 const SUPABASE_URL = 'https://dgbbloirhopjkpnckrdp.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRnYmJsb2lyaG9wamtwbmNrcmRwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3OTcwMzYsImV4cCI6MjA4MzM3MzAzNn0.iVWe7_wVqvQjCIG70Jr9qka_Gn1WeFlRxsIjIvd0Ayg';
 
 let supabaseClient = null;
 let userCode = null;
 let syncEnabled = false;
+let isSyncing = false;
+
+const syncStatusEl = document.getElementById('syncStatus');
+
+function setSyncStatus(status, message) {
+  syncStatusEl.className = 'sync-status ' + status;
+  syncStatusEl.textContent = message;
+  if (status === 'synced') {
+    setTimeout(() => {
+      if (syncStatusEl.textContent === message) {
+        syncStatusEl.textContent = '';
+        syncStatusEl.className = 'sync-status';
+      }
+    }, 2000);
+  }
+}
 
 function initSupabase() {
   if (SUPABASE_URL === 'YOUR_SUPABASE_URL_HERE' || SUPABASE_ANON_KEY === 'YOUR_SUPABASE_ANON_KEY_HERE') {
@@ -166,13 +190,16 @@ function initSupabase() {
     key: SUPABASE_ANON_KEY,
     
     async getData(code) {
-      const response = await fetch(`${this.url}/rest/v1/cuisine_data?code=eq.${code}`, {
+      const response = await fetch(`${this.url}/rest/v1/cuisine_data?code=eq.${encodeURIComponent(code)}`, {
         method: 'GET',
         headers: {
           'apikey': this.key,
           'Authorization': `Bearer ${this.key}`,
         }
       });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch: ${response.status}`);
+      }
       const data = await response.json();
       return data.length > 0 ? data[0] : null;
     },
@@ -192,7 +219,11 @@ function initSupabase() {
           updated_at: new Date().toISOString()
         })
       });
-      return response.ok;
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Failed to upsert: ${response.status} - ${text}`);
+      }
+      return true;
     }
   };
   
@@ -206,7 +237,7 @@ async function promptForCode() {
     return true;
   }
   
-  const code = prompt('Enter your shared code to sync data across devices:');
+  const code = prompt('Enter your shared code to sync data across devices (or leave empty for local-only):');
   if (code && code.trim()) {
     userCode = code.trim();
     localStorage.setItem('cuisineUserCode', userCode);
@@ -215,39 +246,60 @@ async function promptForCode() {
   return false;
 }
 
+// Debounced sync to avoid rapid-fire updates
+let syncTimeout = null;
+function debouncedSync() {
+  if (syncTimeout) clearTimeout(syncTimeout);
+  syncTimeout = setTimeout(() => {
+    syncToCloud();
+  }, 500);
+}
+
 async function syncToCloud() {
-  if (!syncEnabled || !userCode || !supabaseClient) return;
+  if (!syncEnabled || !userCode || !supabaseClient || isSyncing) return;
+  
+  isSyncing = true;
+  setSyncStatus('syncing', 'Saving...');
   
   try {
     await supabaseClient.upsertData(userCode, state);
     console.log('Synced to cloud successfully');
+    setSyncStatus('synced', 'Saved ✓');
   } catch (error) {
     console.error('Sync error:', error);
+    setSyncStatus('error', 'Sync failed');
+  } finally {
+    isSyncing = false;
   }
 }
 
 async function syncFromCloud() {
-  if (!syncEnabled || !userCode || !supabaseClient) return;
+  if (!syncEnabled || !userCode || !supabaseClient) return false;
+  
+  setSyncStatus('syncing', 'Loading...');
   
   try {
     const cloudData = await supabaseClient.getData(userCode);
     if (cloudData && cloudData.data) {
-      state = { ...state, ...cloudData.data };
-      saveState();
+      // Completely replace local state with cloud state
+      state = {
+        remaining: cloudData.data.remaining || [...ALL_COUNTRIES],
+        history: cloudData.data.history || [],
+        ranked: cloudData.data.ranked || [],
+        pending: cloudData.data.pending || null,
+        wheelAngle: cloudData.data.wheelAngle || 0
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       renderAll();
       console.log('Synced from cloud successfully');
+      setSyncStatus('synced', 'Loaded ✓');
       return true;
     }
   } catch (error) {
     console.error('Sync from cloud error:', error);
+    setSyncStatus('error', 'Load failed');
   }
   return false;
-}
-
-async function uploadLocalData() {
-  if (!syncEnabled || !userCode) return;
-  await syncToCloud();
-  alert('Your progress has been uploaded to the cloud!');
 }
 
 async function manualSync() {
@@ -258,15 +310,20 @@ async function manualSync() {
   
   if (!userCode) {
     const hasCode = await promptForCode();
-    if (!hasCode) return;
+    if (!hasCode) {
+      alert('No sync code provided. Using local storage only.');
+      return;
+    }
   }
   
   try {
+    // First push local state to cloud
     await syncToCloud();
+    // Then pull from cloud (in case another device updated)
     await syncFromCloud();
     alert('Sync completed successfully!');
   } catch (error) {
-    alert('Sync failed. Please try again.');
+    alert('Sync failed: ' + error.message);
     console.error(error);
   }
 }
@@ -304,14 +361,42 @@ const ALL_COUNTRIES = [
 
 const STORAGE_KEY = "countrySpinner.un193.v2";
 
-function loadState(){ try{ const raw=localStorage.getItem(STORAGE_KEY); return raw?JSON.parse(raw):null; }catch{ return null; } }
-function saveState(s){ 
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(s || state)); 
-  if (syncEnabled) {
-    syncToCloud();
+function loadState(){ 
+  try { 
+    const raw = localStorage.getItem(STORAGE_KEY); 
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Ensure all required fields exist
+      return {
+        remaining: parsed.remaining || [...ALL_COUNTRIES],
+        history: parsed.history || [],
+        ranked: parsed.ranked || [],
+        pending: parsed.pending || null,
+        wheelAngle: parsed.wheelAngle || 0
+      };
+    }
+    return null;
+  } catch { 
+    return null; 
+  } 
+}
+
+function saveState() { 
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); 
+  if (syncEnabled && userCode) {
+    debouncedSync();
   }
 }
-function freshState(){ return { remaining:[...ALL_COUNTRIES], history:[], ranked:[], pending:null, wheelAngle:0 }; }
+
+function freshState() { 
+  return { 
+    remaining: [...ALL_COUNTRIES], 
+    history: [], 
+    ranked: [], 
+    pending: null, 
+    wheelAngle: 0 
+  }; 
+}
 
 let state = loadState() || freshState();
 
@@ -475,15 +560,19 @@ function maybePending(){
   if (state.pending){
     pendingBanner.style.display = "flex";
     pendingBanner.textContent = `Rank this: ${state.pending}`;
+    placeBtn.disabled = false;
+    skipPendingBtn.disabled = false;
   } else {
     pendingBanner.style.display = "none";
+    placeBtn.disabled = true;
+    skipPendingBtn.disabled = true;
   }
 }
 
 function renderRanking(){
   rankingList.innerHTML = "";
   if (state.ranked.length === 0){
-    rankingList.innerHTML = `<div class="muted" style="margin-top:10px;">—</div>`;
+    rankingList.innerHTML = `<div class="muted" style="margin-top:10px;">No rankings yet. Spin the wheel and rank countries!</div>`;
     return;
   }
   state.ranked.forEach((name, idx) => {
@@ -517,7 +606,7 @@ function renderRanking(){
 function moveRank(from, to){
   const item = state.ranked.splice(from,1)[0];
   state.ranked.splice(to,0,item);
-  saveState(state);
+  saveState();
   renderAll();
 }
 
@@ -556,7 +645,7 @@ spinBtn.onclick = () => {
         state.remaining.splice(picked.idx, 1);
         state.history.push(selected);
         state.pending = selected;
-        saveState(state);
+        saveState();
       }
       isSpinning = false;
       renderAll();
@@ -569,15 +658,27 @@ undoBtn.onclick = () => {
   if (state.history.length === 0) return;
   const last = state.history.pop();
   if (state.pending === last) state.pending = null;
-  if (!state.remaining.includes(last)) state.remaining.push(last);
-  saveState(state);
+  // Remove from ranked if it was ranked
+  const rankedIdx = state.ranked.indexOf(last);
+  if (rankedIdx !== -1) {
+    state.ranked.splice(rankedIdx, 1);
+  }
+  // Add back to remaining if not already there
+  if (!state.remaining.includes(last)) {
+    state.remaining.push(last);
+  }
+  saveState();
   renderAll();
 };
 
-function doReset(){
-  if (!confirm("Reset everything?")) return;
+async function doReset(){
+  if (!confirm("Reset everything? This will clear all progress.")) return;
   state = freshState();
-  saveState(state);
+  saveState();
+  // Force immediate sync for reset
+  if (syncEnabled && userCode) {
+    await syncToCloud();
+  }
   renderAll();
 }
 resetBtn.onclick = doReset;
@@ -589,12 +690,31 @@ placeBtn.onclick = () => {
   const name = state.pending;
   state.ranked.splice(pos-1, 0, name);
   state.pending = null;
-  saveState(state);
+  saveState();
   renderAll();
 };
 
+// FIX: Skip button now actually adds the country back to remaining and clears pending
 skipPendingBtn.onclick = () => {
-  saveState(state);
+  if (!state.pending) return;
+  
+  const skippedCountry = state.pending;
+  
+  // Add back to remaining list if not already there
+  if (!state.remaining.includes(skippedCountry)) {
+    state.remaining.push(skippedCountry);
+  }
+  
+  // Remove from history since we're skipping it
+  const historyIdx = state.history.lastIndexOf(skippedCountry);
+  if (historyIdx !== -1) {
+    state.history.splice(historyIdx, 1);
+  }
+  
+  // Clear pending
+  state.pending = null;
+  
+  saveState();
   renderAll();
 };
 
@@ -616,14 +736,16 @@ async function init() {
   if (syncEnabled) {
     const hasCode = await promptForCode();
     if (hasCode) {
+      // Try to load from cloud first
       const synced = await syncFromCloud();
       if (!synced) {
-        await uploadLocalData();
+        // No cloud data exists, upload local state
+        console.log('No cloud data found, uploading local state');
+        await syncToCloud();
       }
     }
   }
   
-  saveState(state);
   renderAll();
 }
 

@@ -52,27 +52,6 @@
     .kpi > div { background:#0f1220; border:1px solid #2a2f3d; border-radius:14px; padding:10px; }
     .kpi .v { font-weight:950; font-size:16px; }
     .kpi .l { font-size:12px; color:var(--muted); margin-top:2px; }
-    .legend-title { font-weight:900; margin-bottom:8px; }
-    .legend {
-      background:#0f1220;
-      border:1px solid #2a2f3d;
-      border-radius:14px;
-      padding:10px;
-      max-height:420px;
-      overflow:auto;
-    }
-    .legend-item { display:flex; gap:10px; padding:6px 0; border-bottom:1px solid rgba(42,47,61,.55); }
-    .legend-item:last-child { border-bottom:0; }
-    .badge {
-      min-width:34px;
-      text-align:center;
-      font-weight:950;
-      border-radius:10px;
-      padding:4px 8px;
-      background: rgba(90,167,255,.15);
-      border:1px solid rgba(90,167,255,.35);
-      color: var(--text);
-    }
     .rank-item { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px; border:1px solid #2a2f3d; border-radius:14px; background:#0f1220; margin:8px 0; }
     .rank-name { font-weight:900; }
     .rank-actions { display:flex; gap:6px; }
@@ -90,6 +69,21 @@
     .sync-status.syncing { background: rgba(255, 193, 7, 0.2); color: #ffc107; }
     .sync-status.synced { background: rgba(76, 175, 80, 0.2); color: #4caf50; }
     .sync-status.error { background: rgba(244, 67, 54, 0.2); color: #f44336; }
+    #debugLog {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      max-height: 150px;
+      overflow: auto;
+      background: rgba(0,0,0,0.9);
+      color: #0f0;
+      font-family: monospace;
+      font-size: 11px;
+      padding: 8px;
+      display: none;
+    }
+    #debugLog.show { display: block; }
   </style>
 </head>
 <body>
@@ -112,6 +106,7 @@
           <button class="primary" id="spinBtn">SPIN</button>
           <button class="ghost" id="undoBtn">Undo</button>
           <button class="ghost small" id="syncBtn">🔄 Sync</button>
+          <button class="ghost small" id="debugBtn">🐛</button>
           <button class="danger" id="resetBtn">Reset</button>
         </div>
 
@@ -152,16 +147,39 @@
   </section>
 </main>
 
+<div id="debugLog"></div>
+
 <script>
+// ==========================================
+// DEBUG LOGGING
+// ==========================================
+const debugLog = document.getElementById('debugLog');
+const debugBtn = document.getElementById('debugBtn');
+let debugEnabled = false;
+
+debugBtn.onclick = () => {
+  debugEnabled = !debugEnabled;
+  debugLog.classList.toggle('show', debugEnabled);
+};
+
+function log(msg) {
+  console.log(msg);
+  if (debugEnabled) {
+    const line = document.createElement('div');
+    line.textContent = `${new Date().toLocaleTimeString()}: ${msg}`;
+    debugLog.appendChild(line);
+    debugLog.scrollTop = debugLog.scrollHeight;
+  }
+}
+
 // ==========================================
 // SUPABASE CONFIGURATION
 // ==========================================
 const SUPABASE_URL = 'https://dgbbloirhopjkpnckrdp.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRnYmJsb2lyaG9wamtwbmNrcmRwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3OTcwMzYsImV4cCI6MjA4MzM3MzAzNn0.iVWe7_wVqvQjCIG70Jr9qka_Gn1WeFlRxsIjIvd0Ayg';
 
-let supabaseClient = null;
 let userCode = null;
-let syncEnabled = false;
+let syncEnabled = true;
 let isSyncing = false;
 
 const syncStatusEl = document.getElementById('syncStatus');
@@ -169,6 +187,7 @@ const syncStatusEl = document.getElementById('syncStatus');
 function setSyncStatus(status, message) {
   syncStatusEl.className = 'sync-status ' + status;
   syncStatusEl.textContent = message;
+  log(`Sync status: ${status} - ${message}`);
   if (status === 'synced') {
     setTimeout(() => {
       if (syncStatusEl.textContent === message) {
@@ -179,74 +198,25 @@ function setSyncStatus(status, message) {
   }
 }
 
-function initSupabase() {
-  if (SUPABASE_URL === 'YOUR_SUPABASE_URL_HERE' || SUPABASE_ANON_KEY === 'YOUR_SUPABASE_ANON_KEY_HERE') {
-    console.log('Supabase not configured - using localStorage only');
-    return;
-  }
-  
-  supabaseClient = {
-    url: SUPABASE_URL,
-    key: SUPABASE_ANON_KEY,
-    
-    async getData(code) {
-      const response = await fetch(`${this.url}/rest/v1/cuisine_data?code=eq.${encodeURIComponent(code)}`, {
-        method: 'GET',
-        headers: {
-          'apikey': this.key,
-          'Authorization': `Bearer ${this.key}`,
-        }
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to fetch: ${response.status}`);
-      }
-      const data = await response.json();
-      return data.length > 0 ? data[0] : null;
-    },
-    
-    async upsertData(code, stateData) {
-      const response = await fetch(`${this.url}/rest/v1/cuisine_data`, {
-        method: 'POST',
-        headers: {
-          'apikey': this.key,
-          'Authorization': `Bearer ${this.key}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'resolution=merge-duplicates'
-        },
-        body: JSON.stringify({
-          code: code,
-          data: stateData,
-          updated_at: new Date().toISOString()
-        })
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Failed to upsert: ${response.status} - ${text}`);
-      }
-      return true;
-    }
-  };
-  
-  syncEnabled = true;
-}
-
-async function promptForCode() {
+function promptForCode() {
   const savedCode = localStorage.getItem('cuisineUserCode');
   if (savedCode) {
     userCode = savedCode;
+    log(`Using saved code: ${userCode}`);
     return true;
   }
   
-  const code = prompt('Enter your shared code to sync data across devices (or leave empty for local-only):');
+  const code = prompt('Enter your shared code to sync data across devices:');
   if (code && code.trim()) {
     userCode = code.trim();
     localStorage.setItem('cuisineUserCode', userCode);
+    log(`New code saved: ${userCode}`);
     return true;
   }
   return false;
 }
 
-// Debounced sync to avoid rapid-fire updates
+// Debounced sync
 let syncTimeout = null;
 function debouncedSync() {
   if (syncTimeout) clearTimeout(syncTimeout);
@@ -256,80 +226,116 @@ function debouncedSync() {
 }
 
 async function syncToCloud() {
-  if (!syncEnabled || !userCode || !supabaseClient || isSyncing) return;
+  if (!userCode || isSyncing) {
+    log(`Sync skipped: userCode=${userCode}, isSyncing=${isSyncing}`);
+    return;
+  }
   
   isSyncing = true;
   setSyncStatus('syncing', 'Saving...');
   
   try {
-    await supabaseClient.upsertData(userCode, state);
-    console.log('Synced to cloud successfully');
+    const payload = {
+      code: userCode,
+      data: state,
+      updated_at: new Date().toISOString()
+    };
+    
+    log(`POST to cuisine_data: ${JSON.stringify(payload).substring(0, 100)}...`);
+    
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/cuisine_data`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify(payload)
+    });
+    
+    log(`Response status: ${response.status}`);
+    
+    if (!response.ok) {
+      const text = await response.text();
+      log(`Error response: ${text}`);
+      throw new Error(`${response.status}: ${text}`);
+    }
+    
+    log('Sync successful');
     setSyncStatus('synced', 'Saved ✓');
   } catch (error) {
-    console.error('Sync error:', error);
-    setSyncStatus('error', 'Sync failed');
+    log(`Sync error: ${error.message}`);
+    setSyncStatus('error', 'Failed');
   } finally {
     isSyncing = false;
   }
 }
 
 async function syncFromCloud() {
-  if (!syncEnabled || !userCode || !supabaseClient) return false;
+  if (!userCode) return false;
   
   setSyncStatus('syncing', 'Loading...');
+  log(`Fetching data for code: ${userCode}`);
   
   try {
-    const cloudData = await supabaseClient.getData(userCode);
-    if (cloudData && cloudData.data) {
-      // Completely replace local state with cloud state
+    const response = await fetch(
+      `${SUPABASE_URL}/rest/v1/cuisine_data?code=eq.${encodeURIComponent(userCode)}&select=*`,
+      {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        }
+      }
+    );
+    
+    log(`Response status: ${response.status}`);
+    
+    if (!response.ok) {
+      throw new Error(`${response.status}`);
+    }
+    
+    const data = await response.json();
+    log(`Got ${data.length} rows`);
+    
+    if (data.length > 0 && data[0].data) {
+      const cloudData = data[0].data;
       state = {
-        remaining: cloudData.data.remaining || [...ALL_COUNTRIES],
-        history: cloudData.data.history || [],
-        ranked: cloudData.data.ranked || [],
-        pending: cloudData.data.pending || null,
-        wheelAngle: cloudData.data.wheelAngle || 0
+        remaining: cloudData.remaining || [...ALL_COUNTRIES],
+        history: cloudData.history || [],
+        ranked: cloudData.ranked || [],
+        pending: cloudData.pending || null,
+        wheelAngle: cloudData.wheelAngle || 0
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      renderAll();
-      console.log('Synced from cloud successfully');
+      log(`Loaded state: ${state.remaining.length} remaining, ${state.ranked.length} ranked`);
       setSyncStatus('synced', 'Loaded ✓');
       return true;
+    } else {
+      log('No cloud data found');
+      setSyncStatus('', '');
     }
   } catch (error) {
-    console.error('Sync from cloud error:', error);
+    log(`Load error: ${error.message}`);
     setSyncStatus('error', 'Load failed');
   }
   return false;
 }
 
 async function manualSync() {
-  if (!syncEnabled) {
-    alert('Cloud sync is not configured. Using local storage only.');
-    return;
-  }
-  
   if (!userCode) {
-    const hasCode = await promptForCode();
-    if (!hasCode) {
-      alert('No sync code provided. Using local storage only.');
+    if (!promptForCode()) {
+      alert('No sync code provided.');
       return;
     }
   }
   
-  try {
-    // First push local state to cloud
-    await syncToCloud();
-    // Then pull from cloud (in case another device updated)
-    await syncFromCloud();
-    alert('Sync completed successfully!');
-  } catch (error) {
-    alert('Sync failed: ' + error.message);
-    console.error(error);
-  }
+  await syncFromCloud();
+  renderAll();
 }
 
 // ==========================================
-// EXISTING CODE
+// APP STATE
 // ==========================================
 
 const ALL_COUNTRIES = [
@@ -366,7 +372,6 @@ function loadState(){
     const raw = localStorage.getItem(STORAGE_KEY); 
     if (raw) {
       const parsed = JSON.parse(raw);
-      // Ensure all required fields exist
       return {
         remaining: parsed.remaining || [...ALL_COUNTRIES],
         history: parsed.history || [],
@@ -382,8 +387,9 @@ function loadState(){
 }
 
 function saveState() { 
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); 
-  if (syncEnabled && userCode) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  log(`State saved locally: ${state.remaining.length} remaining`);
+  if (userCode) {
     debouncedSync();
   }
 }
@@ -399,6 +405,10 @@ function freshState() {
 }
 
 let state = loadState() || freshState();
+
+// ==========================================
+// UI ELEMENTS
+// ==========================================
 
 const tabSpin = document.getElementById("tabSpin");
 const tabRank = document.getElementById("tabRank");
@@ -572,7 +582,7 @@ function maybePending(){
 function renderRanking(){
   rankingList.innerHTML = "";
   if (state.ranked.length === 0){
-    rankingList.innerHTML = `<div class="muted" style="margin-top:10px;">No rankings yet. Spin the wheel and rank countries!</div>`;
+    rankingList.innerHTML = `<div class="muted" style="margin-top:10px;">No rankings yet.</div>`;
     return;
   }
   state.ranked.forEach((name, idx) => {
@@ -645,6 +655,7 @@ spinBtn.onclick = () => {
         state.remaining.splice(picked.idx, 1);
         state.history.push(selected);
         state.pending = selected;
+        log(`Picked: ${selected}`);
         saveState();
       }
       isSpinning = false;
@@ -658,27 +669,23 @@ undoBtn.onclick = () => {
   if (state.history.length === 0) return;
   const last = state.history.pop();
   if (state.pending === last) state.pending = null;
-  // Remove from ranked if it was ranked
   const rankedIdx = state.ranked.indexOf(last);
   if (rankedIdx !== -1) {
     state.ranked.splice(rankedIdx, 1);
   }
-  // Add back to remaining if not already there
   if (!state.remaining.includes(last)) {
     state.remaining.push(last);
   }
+  log(`Undo: ${last}`);
   saveState();
   renderAll();
 };
 
 async function doReset(){
-  if (!confirm("Reset everything? This will clear all progress.")) return;
+  if (!confirm("Reset everything?")) return;
   state = freshState();
+  log('Reset to fresh state');
   saveState();
-  // Force immediate sync for reset
-  if (syncEnabled && userCode) {
-    await syncToCloud();
-  }
   renderAll();
 }
 resetBtn.onclick = doReset;
@@ -690,30 +697,29 @@ placeBtn.onclick = () => {
   const name = state.pending;
   state.ranked.splice(pos-1, 0, name);
   state.pending = null;
+  log(`Placed ${name} at #${pos}`);
   saveState();
   renderAll();
 };
 
-// FIX: Skip button now actually adds the country back to remaining and clears pending
 skipPendingBtn.onclick = () => {
   if (!state.pending) return;
   
-  const skippedCountry = state.pending;
+  const skipped = state.pending;
+  log(`Skipping: ${skipped}`);
   
-  // Add back to remaining list if not already there
-  if (!state.remaining.includes(skippedCountry)) {
-    state.remaining.push(skippedCountry);
+  // Add back to remaining
+  if (!state.remaining.includes(skipped)) {
+    state.remaining.push(skipped);
   }
   
-  // Remove from history since we're skipping it
-  const historyIdx = state.history.lastIndexOf(skippedCountry);
+  // Remove from history
+  const historyIdx = state.history.lastIndexOf(skipped);
   if (historyIdx !== -1) {
     state.history.splice(historyIdx, 1);
   }
   
-  // Clear pending
   state.pending = null;
-  
   saveState();
   renderAll();
 };
@@ -729,24 +735,21 @@ function renderAll(){
   spinBtn.disabled = isSpinning || state.remaining.length === 0;
 }
 
-// Initialize on load
+// ==========================================
+// INIT
+// ==========================================
 async function init() {
-  initSupabase();
+  log('App initializing...');
   
-  if (syncEnabled) {
-    const hasCode = await promptForCode();
-    if (hasCode) {
-      // Try to load from cloud first
-      const synced = await syncFromCloud();
-      if (!synced) {
-        // No cloud data exists, upload local state
-        console.log('No cloud data found, uploading local state');
-        await syncToCloud();
-      }
+  if (promptForCode()) {
+    const loaded = await syncFromCloud();
+    if (!loaded) {
+      log('No cloud data, will sync on first action');
     }
   }
   
   renderAll();
+  log('App ready');
 }
 
 init();

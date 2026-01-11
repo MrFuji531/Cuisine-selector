@@ -181,6 +181,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 let userCode = null;
 let syncEnabled = true;
 let isSyncing = false;
+let recordExists = false; // Track if record exists in cloud
 
 const syncStatusEl = document.getElementById('syncStatus');
 
@@ -236,23 +237,42 @@ async function syncToCloud() {
   
   try {
     const payload = {
-      code: userCode,
       data: state,
       updated_at: new Date().toISOString()
     };
     
-    log(`POST to cuisine_data: ${JSON.stringify(payload).substring(0, 100)}...`);
+    let response;
     
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/cuisine_data`, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'resolution=merge-duplicates'
-      },
-      body: JSON.stringify(payload)
-    });
+    if (recordExists) {
+      // Record exists, use PATCH to update
+      log(`PATCH update for code: ${userCode}`);
+      response = await fetch(`${SUPABASE_URL}/rest/v1/cuisine_data?code=eq.${encodeURIComponent(userCode)}`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+    } else {
+      // Record doesn't exist, use POST to insert
+      log(`POST insert for code: ${userCode}`);
+      payload.code = userCode;
+      response = await fetch(`${SUPABASE_URL}/rest/v1/cuisine_data`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      if (response.ok) {
+        recordExists = true; // Now it exists
+      }
+    }
     
     log(`Response status: ${response.status}`);
     
@@ -299,6 +319,7 @@ async function syncFromCloud() {
     log(`Got ${data.length} rows`);
     
     if (data.length > 0 && data[0].data) {
+      recordExists = true; // Record exists in cloud
       const cloudData = data[0].data;
       state = {
         remaining: cloudData.remaining || [...ALL_COUNTRIES],
@@ -308,10 +329,11 @@ async function syncFromCloud() {
         wheelAngle: cloudData.wheelAngle || 0
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      log(`Loaded state: ${state.remaining.length} remaining, ${state.ranked.length} ranked`);
+      log(`Loaded state: ${state.remaining.length} remaining, ${state.ranked.length} ranked, pending: ${state.pending}`);
       setSyncStatus('synced', 'Loaded ✓');
       return true;
     } else {
+      recordExists = false; // No record in cloud
       log('No cloud data found');
       setSyncStatus('', '');
     }
@@ -388,7 +410,7 @@ function loadState(){
 
 function saveState() { 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  log(`State saved locally: ${state.remaining.length} remaining`);
+  log(`State saved locally: ${state.remaining.length} remaining, pending: ${state.pending}`);
   if (userCode) {
     debouncedSync();
   }
@@ -744,7 +766,8 @@ async function init() {
   if (promptForCode()) {
     const loaded = await syncFromCloud();
     if (!loaded) {
-      log('No cloud data, will sync on first action');
+      log('No cloud data, will create on first action');
+      recordExists = false;
     }
   }
   
